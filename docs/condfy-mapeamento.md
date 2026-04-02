@@ -1,27 +1,39 @@
-# Mapeamento das Operações Condfy
+# Mapeamento das Operações Condfy — v4.1
 
-O Condfy usa JSF PrimeFaces com scraping via HTTP. Todas as operações seguem o padrão:
-1. GET na página do imóvel → extrai ViewState + cookies
-2. POST AJAX com `Faces-Request: partial/ajax` → executa ação
+O Condfy usa JSF PrimeFaces. Todas as operações são simulação de browser via HTTP com cookies e ViewState.
 
-## Padrão de Cookie Propagation
+**URL Base:** `https://projectexe.acesso.app.br`
 
+---
+
+## Fluxo de Login (padrão para todos os sub-workflows)
+
+```
+1. GET /login → extrai ViewState + cookies iniciais
+2. POST /login.xhtml
+   Headers: Cookie: {cookies_step1}, Faces-Request: partial/ajax
+   Body: form=form, form:login={user}, form:senha={pass}, form:captcha=''
+         form:logar=form:logar, javax.faces.ViewState={vs}
+         javax.faces.partial.ajax=true, javax.faces.source=form:logar
+         javax.faces.partial.execute=@all, javax.faces.partial.render=@all
+3. Merge cookies (step1 + set-cookie do step2) → usar em todas as requisições
+```
+
+**Padrão de merge de cookies:**
 ```javascript
-// Merge cookies de múltiplas respostas
 const map = {};
 (prev.cookies + '; ' + newCookies).split('; ').forEach(c => {
   const idx = c.indexOf('=');
   if (idx > 0) {
-    const k = c.substring(0,idx).trim();
-    const v = c.substring(idx+1).trim();
+    const k = c.substring(0, idx).trim();
+    const v = c.substring(idx + 1).trim();
     if (k) map[k] = v;
   }
 });
 const cookies = Object.entries(map).map(([k,v]) => k+'='+v).join('; ');
 ```
 
-## Padrão de Extração de ViewState
-
+**Extração de ViewState:**
 ```javascript
 const body = item.body || item.data || '';
 let viewState = '';
@@ -34,17 +46,21 @@ if (vsIdx >= 0) {
 }
 ```
 
-## URL Base
+---
 
-```
-https://app.condfy.com.br/imovel/{imovel_id}.jsf
-```
+## Operação 1: Consultar Moradores
 
-## Operação: Consultar Moradores
-
-**Workflow:** `zjTlC9KhcxC5n0iU`
-
+**Workflow:** `zjTlC9KhcxC5n0iU`  
 **Input:** `{ imovel_id: string }`
+
+**URL:** GET `/imoveis/{imovel_id}/moradores`
+
+**Parse da tabela HTML:**
+- Rows: `<tr data-ri="{idx}" data-rk="{rk}">` — `rk` é o ID Condfy do morador
+- Nome: `abrirModalFoto('{nome}',` — texto entre aspas
+- Telefone: `href="tel:{tel}"` — normalizar para `+55XXXXXXXXXXX`
+- Relação: 4º `<td>` do row
+- Login status: dentro de `form:dtMoradores:{idx}:j_idt645`
 
 **Output:**
 ```json
@@ -57,58 +73,112 @@ https://app.condfy.com.br/imovel/{imovel_id}.jsf
 }
 ```
 
-**Fluxo:**
-1. GET `/imovel/{imovel_id}.jsf` → extrai ViewState + cookies
-2. POST AJAX para abrir aba de moradores → extrai lista HTML
-3. Parse da lista → retorna JSON estruturado
+---
 
-## Operação: Excluir Morador
+## Operação 2: Cadastrar Morador (Novo Convite)
 
-**Workflow:** `pqqSU1eo4N1pdrxg`
+**Workflow:** `BtvDTOUItduxjt7t`  
+**Input:** `{ imovel_id, nome, celular, tipo }`
 
+**URL:** POST `/moradia/moradores.xhtml`
+
+**Atenção:** A criação usa a rota `/moradia/moradores.xhtml` (não `/imoveis/{id}/moradores`).
+
+**Passo 1:** Selecionar condo na sessão via `/moradia/selecionar.xhtml`
+
+**Campos do form `incluirMorador`:**
+
+| Campo | Descrição |
+|---|---|
+| `form:nome` | Nome completo (obrigatório) |
+| `form:celular` | Celular (obrigatório para convite WhatsApp) |
+| `form:tipoConvite` | `WHATSAPP` / `SMS` / `EMAIL` |
+| `form:relacaoMorador` | `APENAS_RESPONSAVEL` / `NAO_RESPONSAVEL` |
+| `form:relacaoResponsavel` | Descrição/apelido |
+| `form:dialogMotivo1:j_idt705` | Motivo (obrigatório) |
+
+**Submit:**
+```
+javax.faces.source=form:dialogMotivo1:j_idt710
+javax.faces.partial.execute=form:incluirMorador form:dialogMotivo1:dialogSalvar
+javax.faces.partial.render=form
+```
+
+**Resposta de sucesso:** XML parcial com `"Convite criado com sucesso"`
+
+---
+
+## Operação 3: Excluir Morador
+
+**Workflow:** `pqqSU1eo4N1pdrxg`  
 **Input:** `{ imovel_id: string, morador_rk: string }`
 
-**Fluxo:**
-1. GET página → ViewState + cookies
-2. POST AJAX abrir aba moradores
-3. POST AJAX clicar excluir no morador (usando rk)
-4. POST AJAX confirmar exclusão
+**Pré-requisito:** Saber o `row_index` do morador (0-based) via consulta prévia.
 
-## Operação: Cadastrar Morador
+**Passo 1 — Abrir dialog de exclusão:**
+```
+javax.faces.source=form:dtMoradores:{row_index}:j_idt678
+javax.faces.partial.execute=form:dtMoradores:{row_index}:j_idt678
+javax.faces.partial.render=form:dialogMotivo2:dialogExcluir
+```
+→ Atualizar ViewState da resposta
 
-**Workflow:** `BtvDTOUItduxjt7t`
+**Passo 2 — Confirmar com motivo:**
+```
+javax.faces.source=form:dialogMotivo2:j_idt725
+javax.faces.partial.execute=form:dialogMotivo2:dialogExcluir
+javax.faces.partial.render=form
+form:dialogMotivo2:j_idt720={motivo}
+```
 
-**Input:** `{ imovel_id: string, nome: string, celular: string, tipo: string }`
+**Fluxo completo:**
+1. Login
+2. GET `/imoveis/{imovel_id}/moradores` → ViewState + encontrar row_index pelo rk
+3. POST passo 1 → novo ViewState
+4. POST passo 2 com motivo → confirmação
 
-**Fluxo:**
-1. GET página → ViewState + cookies
-2. POST AJAX abrir aba moradores
-3. POST AJAX abrir form de novo morador
-4. POST AJAX preencher e salvar dados
+---
 
-## Operação: Convidar Morador (WhatsApp)
+## Operação 4: Acesso Temporário (Convidar ao App)
 
-**Workflow:** `5Wn8Mka7zHJPARkR`
-
+**Workflow:** `5Wn8Mka7zHJPARkR`  
 **Input:** `{ imovel_id: string, morador_rk: string, celular: string }`
 
-**Dialog campos:**
-- `form:tipoConvite` — radio: `WHATSAPP` | `SMS` | `EMAIL`
-- `form:morador` — select com valor = rk do morador
-- `form:conviteMoradorS` — campo celular (formato 47XXXXXXXXX)
-- Botão submit: `form:j_idt796`
-- Abrir dialog: source=`form:j_idt211`, render=`form:conviteMoradia`
+**URL:** POST `/imoveis/{imovel_id}/moradores`
 
-**Fluxo:**
-1. GET página → ViewState + cookies
-2. POST AJAX abrir dialog de convite
-3. POST AJAX preencher tipo (WHATSAPP)
-4. POST AJAX selecionar morador
-5. POST AJAX preencher celular
-6. POST AJAX submit → envio do convite
+**Campos do dialog `form:conviteMoradia`:**
+
+| Campo | Valor |
+|---|---|
+| `form:tipoConvite` | `WHATSAPP` / `SMS` / `EMAIL` |
+| `form:morador` | rk do morador (ex: `3123088`) |
+| `form:conviteMoradorS` | celular sem formatação (ex: `47933808082`) |
+| Botão submit | `form:j_idt796` |
+
+**Abrir dialog:**
+```
+javax.faces.source=form:j_idt211
+javax.faces.partial.render=form:conviteMoradia
+```
+
+---
+
+## Showroom de Teste
+
+| Item | Valor |
+|---|---|
+| Condo ID | `11760` |
+| Bloco ID | `73626` |
+| Imóvel 1 | `1338843` |
+| Imóvel 2 | `1457159` |
+| Imóvel 3 | `1338841` |
+
+---
 
 ## Notas Importantes
 
-- **Task runner n8n:** `$helpers`, `fetch` e referências cross-node NÃO disponíveis em Code nodes de sub-workflows. Usar HTTP Request nodes para chamadas HTTP.
-- **executeWorkflow:** dados chegam flat no trigger do sub-workflow (sem `.body`). Ler com `$input.item.json.campo` diretamente.
-- **Propagar dados:** sempre usar spread `{...prev, novoCampo}` em cada Code node para não perder dados anteriores.
+- **Task runner n8n:** `$helpers` e `fetch` NÃO disponíveis em Code nodes. Usar HTTP Request nodes.
+- **executeWorkflow:** dados chegam flat no trigger (sem `.body`). Ler com `$input.item.json.campo`.
+- **HTTP Request v4.2:** fullResponse retorna dados em `data`, não em `body`.
+- **Propagar dados entre nós:** usar spread `{...prev, novoCampo}` para não perder contexto.
+- **runOnceForEachItem bug:** usar sempre `runOnceForAllItems` com `$input.all()` loop e `pairedItem: { item: i }` explícito.
