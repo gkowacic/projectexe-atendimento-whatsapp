@@ -43,11 +43,12 @@ Resposta ao morador
 
 ### Workflows de Suporte
 
-| Workflow | ID | Status |
-|---|---|---|
-| Sync diário Condfy → Supabase | `a5EU8tNlYkfrjojl` | Ativo |
-| Scrape Condo (sub) | `dAZJccR3zMnEjUCM` | Ativo |
-| Util criar views KPI | `wXGAyH6DilJA22Gx` | Pendente execução |
+| Workflow | ID | Status | Observação |
+|---|---|---|---|
+| Sync diário Condfy → Supabase | `a5EU8tNlYkfrjojl` | Ativo | Cron 06:00 |
+| Scrape Condo (sub) | `dAZJccR3zMnEjUCM` | Ativo | Chamado pelo sync |
+| Util criar views KPI | `wXGAyH6DilJA22Gx` | Ativo | Rodar só quando precisar recriar views |
+| Relatório Semanal | `kYrNrGKMHQyqCXu9` | Ativo | Schedule segunda 09:00 BRT |
 
 ---
 
@@ -89,8 +90,22 @@ Resposta ao morador
 | `condominios` | 6 condomínios com decisor, Condfy ID, GC ID, regras JSONB |
 | `chamados` | Chamados registrados (8 tipos, prioridade, status, GC ID) |
 | `interacoes` | Histórico de conversas por contato (JSONB, 180 dias) |
+| `relatorios_semanais` | Log dos relatórios gerados (mensagem + timestamp) |
 
-> Views de KPIs criadas via workflow util (`wXGAyH6DilJA22Gx`).
+### Views KPI (public schema)
+
+| View | Usado por |
+|---|---|
+| `kpi_dashboard` | Dashboard Next.js — linha agregada de resumo |
+| `kpi_moradores_por_condo` | Dashboard + Relatório semanal |
+| `kpi_chamados_abertos` | Dashboard — tabela de chamados em aberto |
+| `kpi_chamados_30d` | Dashboard — área chart 30 dias |
+| `kpi_chamados_por_tipo` | Dashboard — donut chart |
+| `kpi_atendimentos_7d` | Dashboard — bar chart 7 dias |
+| `kpi_status_geral` | Relatório semanal — totais gerais |
+| `kpi_chamados_por_condo` | Relatório semanal — chamados por condomínio |
+
+> Para recriar: `curl -X POST http://localhost:5678/webhook/criar-views-kpi -d "{}"`
 
 ---
 
@@ -105,6 +120,25 @@ Cron 06:00 → Login JSF → Parse Condominios (6)
   → UPSERT condominios (Postgres)
   → Scrape Condo Sub-workflow × 6 (paralelo)
     → Scrape moradores → UPSERT contatos
+```
+
+---
+
+## Relatório Semanal
+
+**Trigger:** Schedule toda segunda-feira às 09:00 BRT  
+**Teste:** `curl -X POST http://localhost:5678/webhook/relatorio-semanal-test -H "Content-Type: application/json" -d "{}"`  
+**Saída:** Mensagem WhatsApp formatada (markdown Bold/Italic)  
+**Log:** Tabela `relatorios_semanais`  
+**Envio WhatsApp:** Node desabilitado — habilitar após Evolution API configurada
+
+```
+Schedule/Webhook → Buscar KPIs (Postgres CTE)
+  → Formatar Mensagem (Code node)
+    ├→ Enviar WhatsApp Gustavo (HTTP — DESABILITADO)
+    ├→ Log Relatorio (CREATE TABLE IF NOT EXISTS)
+    │     └→ Salvar Log (INSERT)
+    └→ Responder Teste (Respond to Webhook)
 ```
 
 ---
