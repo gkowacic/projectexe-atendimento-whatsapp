@@ -1,11 +1,9 @@
-# ProjectEXE Atendimento WhatsApp v4.1 — Workflows n8n
+# ProjectEXE Atendimento WhatsApp — Workflows n8n
 
 ## Arquitetura
 
 ```
-WhatsApp (API Oficial Meta)
-    ↓
-Evolution API (VPS Locaweb)
+WhatsApp (BotConversa / Evolution API)
     ↓
 Webhook n8n
     ↓
@@ -13,29 +11,28 @@ Webhook n8n
     ↓
 [Agente Sonnet especialista] — responde + emite tags de ação
     ↓
-[Parser de tags] — executa ações via sub-workflows Condfy
+[Parser de tags] — executa ações via sub-workflows
     ↓
 Resposta ao morador
 ```
-
----
 
 ## IDs dos Workflows
 
 ### Workflows Principais
 
 | Workflow | ID | Status |
-|---|---|---|
+|----------|-----|--------|
 | Orquestrador Haiku | `gff6jdJlaHVffagk` | Ativo |
 | Agente Cadastro | `Kwvtjmoh4prm7OlA` | Ativo |
 | Agente Chamado | `ktzZOHsJie08H5PR` | Ativo |
 | Agente Lead | `EncZOoqh4guBZK3r` | Ativo |
 | Agente Operacional | `pNM9Yez5y1RUeD0z` | Ativo |
+| Relatório Semanal | `kYrNrGKMHQyqCXu9` | Ativo |
 
 ### Sub-workflows Condfy
 
 | Workflow | ID | Status | Testado |
-|---|---|---|---|
+|----------|-----|--------|---------|
 | condfy-consultar | `zjTlC9KhcxC5n0iU` | Ativo | ✅ |
 | condfy-excluir | `pqqSU1eo4N1pdrxg` | Ativo | — |
 | condfy-cadastrar | `BtvDTOUItduxjt7t` | Ativo | — |
@@ -43,108 +40,85 @@ Resposta ao morador
 
 ### Workflows de Suporte
 
-| Workflow | ID | Status | Observação |
-|---|---|---|---|
-| Sync diário Condfy → Supabase | `a5EU8tNlYkfrjojl` | Ativo | Cron 06:00 |
-| Scrape Condo (sub) | `dAZJccR3zMnEjUCM` | Ativo | Chamado pelo sync |
-| Util criar views KPI | `wXGAyH6DilJA22Gx` | Ativo | Rodar só quando precisar recriar views |
-| Relatório Semanal | `kYrNrGKMHQyqCXu9` | Ativo | Schedule segunda 09:00 BRT |
-
----
+| Workflow | ID | Status |
+|----------|-----|--------|
+| Sync diário Condfy | `a5EU8tNlYkfrjojl` | Ativo |
+| util-check-schema | `ovgRfJvOHAIlEBXE` | Inativo |
+| util-criar-views-kpi | `wXGAyH6DilJA22Gx` | Inativo |
 
 ## Credenciais n8n
 
 | Credencial | ID |
-|---|---|
-| Supabase (Postgres direto) | `GQfB9He6oEKDaFkx` |
+|-----------|---|
+| Supabase (Postgres) | `GQfB9He6oEKDaFkx` |
 | Anthropic | `i4lndXDTCgIBR0A0` |
-
----
-
-## Fluxo de Dados
-
-### Entrada (Webhook — Evolution API)
-```json
-{
-  "telefone": "5547XXXXXXXXX",
-  "mensagem": "texto da mensagem",
-  "nome_morador": "Nome"
-}
-```
-
-### Saída (Evolution API → WhatsApp)
-```json
-{
-  "resposta": "texto para o morador",
-  "agente": "cadastro|chamado|operacional|lead"
-}
-```
-
----
 
 ## Tabelas Supabase
 
 | Tabela | Descrição |
-|---|---|
-| `contatos` | Moradores sincronizados do Condfy (com condominio_id) |
-| `condominios` | 6 condomínios com decisor, Condfy ID, GC ID, regras JSONB |
-| `chamados` | Chamados registrados (8 tipos, prioridade, status, GC ID) |
-| `interacoes` | Histórico de conversas por contato (JSONB, 180 dias) |
-| `relatorios_semanais` | Log dos relatórios gerados (mensagem + timestamp) |
+|--------|----------|
+| `condominios` | 6 condos + showroom |
+| `contatos` | 735 moradores sincronizados do Condfy |
+| `chamados` | Chamados registrados pelos agentes |
+| `interacoes_sessao` | Histórico de conversas por telefone (JSONB) |
+| `relatorios_semanais` | Logs dos relatórios gerados |
 
-### Views KPI (public schema)
+## Views KPI (Supabase)
 
-| View | Usado por |
-|---|---|
-| `kpi_dashboard` | Dashboard Next.js — linha agregada de resumo |
-| `kpi_moradores_por_condo` | Dashboard + Relatório semanal |
-| `kpi_chamados_abertos` | Dashboard — tabela de chamados em aberto |
-| `kpi_chamados_30d` | Dashboard — área chart 30 dias |
-| `kpi_chamados_por_tipo` | Dashboard — donut chart |
-| `kpi_atendimentos_7d` | Dashboard — bar chart 7 dias |
-| `kpi_status_geral` | Relatório semanal — totais gerais |
-| `kpi_chamados_por_condo` | Relatório semanal — chamados por condomínio |
+| View | Colunas principais |
+|------|-------------------|
+| `kpi_dashboard` | total_contatos, chamados_abertos, chamados_hoje, taxa_resolucao |
+| `kpi_status_geral` | total_condominios, total_contatos, chamados_abertos, urgentes |
+| `kpi_moradores_por_condo` | condominio_nome, total_moradores |
+| `kpi_chamados_por_condo` | condominio, em_aberto, alta_prioridade, ultimos_30d |
+| `kpi_chamados_abertos` | id, tipo, prioridade, condominio_nome, status |
+| `kpi_chamados_por_categoria` | tipo, total, alta, em_aberto, avg_horas_resolucao |
+| `kpi_chamados_por_tipo` | tipo, total |
+| `kpi_chamados_30d` | data, total |
+| `kpi_atendimentos_7d` | data, total |
+| `kpi_atividade_semanal` | dia, total_interacoes, contatos_unicos |
 
-> Para recriar: `curl -X POST http://localhost:5678/webhook/criar-views-kpi -d "{}"`
+## Workflow Relatório Semanal
 
----
+**ID:** `kYrNrGKMHQyqCXu9`
 
-## Sync Diário Condfy
+**Trigger produção:** Schedule — toda segunda-feira às 9h BRT
 
-**Horário:** 06:00 (cron)  
-**Resultados (última execução — 01/04/2026):** 6 condominios, 734 contatos  
-**Duração média:** ~3m45s
+**Trigger teste:** `POST http://localhost:5678/webhook/relatorio-semanal-test`
 
+**Saída gerada (exemplo real — 02/04/2026):**
 ```
-Cron 06:00 → Login JSF → Parse Condominios (6)
-  → UPSERT condominios (Postgres)
-  → Scrape Condo Sub-workflow × 6 (paralelo)
-    → Scrape moradores → UPSERT contatos
-```
+📊 *Relatório Semanal ProjectEXE*
+_26/03/2026 a 02/04/2026_
 
----
+*Visão Geral:*
+• Total moradores: 735
+• Chamados em aberto: 0
+• Urgentes: 0
+• Novos na semana: 0
 
-## Relatório Semanal
+*Por Condomínio:*
+• Pharol do Porto: 238 moradores, 0 abertos
+• Lotisa Classic: 174 moradores, 0 abertos
+• Workhub Coworking: 164 moradores, 0 abertos
+• San Marino Residence: 90 moradores, 0 abertos
+• Ethima: 58 moradores, 0 abertos
+• Infinitá Tree House: 11 moradores, 0 abertos
 
-**Trigger:** Schedule toda segunda-feira às 09:00 BRT  
-**Teste:** `curl -X POST http://localhost:5678/webhook/relatorio-semanal-test -H "Content-Type: application/json" -d "{}"`  
-**Saída:** Mensagem WhatsApp formatada (markdown Bold/Italic)  
-**Log:** Tabela `relatorios_semanais`  
-**Envio WhatsApp:** Node desabilitado — habilitar após Evolution API configurada
-
-```
-Schedule/Webhook → Buscar KPIs (Postgres CTE)
-  → Formatar Mensagem (Code node)
-    ├→ Enviar WhatsApp Gustavo (HTTP — DESABILITADO)
-    ├→ Log Relatorio (CREATE TABLE IF NOT EXISTS)
-    │     └→ Salvar Log (INSERT)
-    └→ Responder Teste (Respond to Webhook)
+*Atendimentos WhatsApp (7d): 0*
 ```
 
----
+**Envio WhatsApp:** node `Enviar WhatsApp Gustavo` está DESABILITADO.
+Habilitar após configurar Evolution API e substituir `EVOLUTION_API_KEY_AQUI` pela chave real.
 
 ## Ambiente de Teste
 
 - **Showroom Condfy:** `condfy_id = 11760`, `imovel_id = 1338843`
-- Todos os testes devem ser feitos no Showroom antes de habilitar em produção
-- Sub-workflow scrape: `dAZJccR3zMnEjUCM`
+- Todos os testes feitos no Showroom antes de habilitar em produção
+
+## Próximos Passos (Go-live)
+
+1. **Vercel** — conectar repo em vercel.com/new, root dir: `dashboard`, env: `SUPABASE_ANON_KEY`
+2. **Evolution API** — instalar na VPS, escanear QR, configurar webhook → Orquestrador Haiku
+3. **Habilitar WhatsApp no relatório semanal** — trocar API key e ativar o node
+4. **Testes end-to-end** — enviar mensagem real e validar fluxo completo
